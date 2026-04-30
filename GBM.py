@@ -29,9 +29,17 @@ class GBM:
         brownianShock = math.exp(self.volConverted * self.brownianMotion[t])
         return self.initialPrice * driftGrowth * volDecay * brownianShock
 
-    def simulate(self):
-        self.createBrownianMotion()
-        self.prices = [self.price(t) for t, brownianMotion in enumerate(self.brownianMotion)]
+    def simulate(self, N = 1, plot = False):
+        paths = []
+        for _ in range(N):
+            self.createBrownianMotion()
+            self.prices = [self.price(t) for t, brownianMotion in enumerate(self.brownianMotion)]
+            paths.append(self.prices)
+        
+        if plot:
+            for path in paths: plt.plot(path)
+            plt.show()
+        return paths
 
     def plot(self):
         plt.figure(figsize=(12, 5))

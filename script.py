@@ -2,14 +2,14 @@ from Strategies import Strategies
 from GBM import GBM
 import matplotlib.pyplot as plt
 
-priceModel = GBM()
+priceModel = GBM(drift = 10 / 100)
 
 # test strategies 
 buyAndhold = []
 follower = []
 contrarian = []
 
-iterations = 10000
+iterations = 100000
 for i in range(iterations):
     priceModel.simulate()
     stratego = Strategies(priceModel.prices)
