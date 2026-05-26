@@ -46,60 +46,125 @@ with r_col:
 # --- ROW 4: THE TACTICAL GRAPH ---
 contract = Option(symbol, expiration, strike, option_type, price, delta, gamma)
 
-# Generate a wide range with 500 points for a perfectly smooth curve
-lower_bound = strike * 0.75
-upper_bound = strike * 1.25
-x_vals = np.linspace(lower_bound, upper_bound, 500)
+# Generate dense X values for smooth shading
+x_raw = np.linspace(strike * 0.75, strike * 1.25, 1000)
+pnl_raw = np.array([contract.calculatePrice(x, vol, rate) - price for x in x_raw])
+theo_raw = np.array([contract.calculatePrice(x, vol, rate) for x in x_raw])
 
-pnl_vals = [contract.calculatePrice(x, vol, rate) - price for x in x_vals]
+# Find exact Breakeven to ensure no visual gaps between red and green fills
+zero_crossings = np.where(np.diff(np.sign(pnl_raw)))[0]
+be_x = None
+
+if len(zero_crossings) > 0:
+    idx = zero_crossings[0]
+    x0, x1 = x_raw[idx], x_raw[idx+1]
+    y0, y1 = pnl_raw[idx], pnl_raw[idx+1]
+    
+    # Linear interpolation to find the exact zero intercept
+    t = (0 - y0) / (y1 - y0)
+    be_x = x0 + t * (x1 - x0)
+    be_theo = theo_raw[idx] + t * (theo_raw[idx+1] - theo_raw[idx])
+    
+    # Insert exact 0 point into our arrays
+    x_vals = np.insert(x_raw, idx+1, be_x)
+    pnl_vals = np.insert(pnl_raw, idx+1, 0.0)
+    theo_vals = np.insert(theo_raw, idx+1, be_theo)
+else:
+    x_vals, pnl_vals, theo_vals = x_raw, pnl_raw, theo_raw
+
+# Mask arrays for Red/Green splits
+pos_mask = pnl_vals >= 0
+neg_mask = pnl_vals <= 0
+
+# Convert false values to NaN so Plotly only draws the relevant sections
+pnl_pos = np.where(pos_mask, pnl_vals, np.nan)
+pnl_neg = np.where(neg_mask, pnl_vals, np.nan)
+
+# Format text strings here so the hover template remains clean
+custom_pos = np.column_stack((
+    [f"${t:.2f}" for t in theo_vals],
+    [f"+${p:.2f}" for p in pnl_vals]
+))
+
+custom_neg = np.column_stack((
+    [f"${t:.2f}" for t in theo_vals],
+    [f"-${abs(p):.2f}" for p in pnl_vals]
+))
 
 fig = go.Figure()
 
-# Add the main PnL trace with spline smoothing
+# Green Area (Positive PnL)
 fig.add_trace(go.Scatter(
-    x=x_vals,
-    y=pnl_vals,
+    x=x_vals, y=pnl_pos,
     mode='lines',
-    name='Current PnL',
-    line=dict(color='#00ffcc', width=3, shape='spline'), 
+    line=dict(color='#00e676', width=2),
     fill='tozeroy',
-    fillcolor='rgba(0, 255, 204, 0.05)', 
-    hovertemplate="Underlying: $%{x:.2f}<br>PnL: $%{y:.2f}<extra></extra>"
+    fillcolor='rgba(0, 230, 118, 0.15)',
+    customdata=custom_pos,
+    hovertemplate="<span style='font-size:24px; color:#00e676'><b>%{customdata[1]}</b></span><br><span style='font-size:16px; color:#ffffff'>Price: %{customdata[0]}</span><extra></extra>",
+    hoverlabel=dict(bgcolor="rgba(15,15,15,0.9)", bordercolor="#00e676")
 ))
 
-# Add the Zero Line (Breakeven)
-fig.add_hline(y=0, line_width=1.5, line_color="#ff4b4b")
+# Red Area (Negative PnL)
+fig.add_trace(go.Scatter(
+    x=x_vals, y=pnl_neg,
+    mode='lines',
+    line=dict(color='#ff5252', width=2),
+    fill='tozeroy',
+    fillcolor='rgba(255, 82, 82, 0.15)',
+    customdata=custom_neg,
+    hovertemplate="<span style='font-size:24px; color:#ff5252'><b>%{customdata[1]}</b></span><br><span style='font-size:16px; color:#ffffff'>Price: %{customdata[0]}</span><extra></extra>",
+    hoverlabel=dict(bgcolor="rgba(15,15,15,0.9)", bordercolor="#ff5252")
+))
 
-# Add the Strike Line
-fig.add_vline(x=strike, line_width=1, line_dash="dash", line_color="#888888")
+# Add Breakeven Node
+if be_x is not None:
+    fig.add_trace(go.Scatter(
+        x=[be_x], y=[0],
+        mode='markers',
+        marker=dict(color='#ffffff', size=8, line=dict(color='#111111', width=2)),
+        hoverinfo="skip" # Let the main line handle the hover data
+    ))
 
-# Minimalist Layout Updates
+# Add Strike Node
+pnl_at_strike = contract.calculatePrice(strike, vol, rate) - price
+fig.add_trace(go.Scatter(
+    x=[strike], y=[pnl_at_strike],
+    mode='markers',
+    marker=dict(color='#ffffff', size=8, line=dict(color='#111111', width=2)),
+    hoverinfo="skip"
+))
+
+# Minimalist Layout
 fig.update_layout(
-    template="plotly_dark", 
-    xaxis_title="Underlying Price ($)",
-    yaxis_title="Theoretical PnL ($)",
-    hovermode="x unified",
-    dragmode=False, # Disables the clunky zoom boxes
+    template="plotly_dark",
+    showlegend=False,
+    hovermode="x", # Snaps the massive tooltip directly to the cursor crosshair
+    dragmode=False,
     xaxis=dict(
-        showgrid=False, # Removes grid lines
+        showgrid=False,
         zeroline=False,
-        showspikes=True, 
+        showticklabels=True,
+        showspikes=True,
         spikemode='across',
+        spikesnap='cursor',
         spikedash='solid',
         spikethickness=1,
         spikecolor='#ffffff',
-        fixedrange=True # Prevents accidental scrolling/zooming
+        fixedrange=True
     ),
     yaxis=dict(
-        showgrid=False, # Removes grid lines
-        zeroline=False,
+        showgrid=False,
+        zeroline=True,
+        zerolinecolor='rgba(255,255,255,0.1)',
+        zerolinewidth=1,
+        showticklabels=False, # Kills the useless Y-axis text
         fixedrange=True
     ),
     plot_bgcolor='rgba(15, 15, 15, 1)',
     paper_bgcolor='rgba(15, 15, 15, 1)',
-    margin=dict(l=0, r=0, t=30, b=0),
-    height=550
+    margin=dict(l=0, r=0, t=10, b=20),
+    height=450
 )
 
-# Render the graph and hide the modebar
 st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
